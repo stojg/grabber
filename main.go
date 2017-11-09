@@ -31,11 +31,17 @@ func main() {
 
 func update(lastUpdated time.Time) {
 
-    token := os.Getenv("TOKEN")
+    token := os.Getenv("GRABBER_WIRELESSTAG_TOKEN")
     if token == "" {
-        fmt.Println("Need TOKEN")
+        fmt.Println("Need GRABBER_WIRELESSTAG_TOKEN")
         os.Exit(1)
     }
+
+	influxdbHost := os.Getenv("GRABBER_INFLUX_URL")
+	if influxdbHost == "" {
+		fmt.Println("Need GRABBER_INFLUX_URL")
+		os.Exit(1)
+	}
 
 	tags, err := wirelesstags.Get(token, "https://www.mytaglist.com", lastUpdated)
 	if err != nil {
