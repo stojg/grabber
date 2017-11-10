@@ -52,7 +52,7 @@ func update(lastUpdated time.Time) {
 	fmt.Printf("Updated %d tags\n", len(tags))
 
 	c, err := client.NewHTTPClient(client.HTTPConfig{
-		Addr:     "http://localhost:8086",
+		Addr:     influxdbHost,
 		Username: username,
 		Password: password,
 	})
