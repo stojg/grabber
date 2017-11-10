@@ -20,31 +20,40 @@ const (
 	TYPE_SIGNAL      = "signal"
 )
 
-func Get(token string, domain string, since time.Time) ([]*Tag, error) {
-
-	var netClient = &http.Client{
-		Timeout: time.Second * 10,
+func New(client *http.Client, domain, token string) *WirelessTags {
+	return &WirelessTags{
+		client: client,
+		domain: domain,
+		token:  token,
 	}
+}
+
+type WirelessTags struct {
+	client *http.Client
+	domain string
+	token  string
+}
+
+func (w *WirelessTags) Get(since time.Time) ([]*Tag, error) {
 
 	var body = []byte(`{}`)
-	req, err := http.NewRequest("POST", domain+"/ethClient.asmx/GetTagList2", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", w.domain+"/ethClient.asmx/GetTagList2", bytes.NewBuffer(body))
 	if err != nil {
 		return nil, fmt.Errorf("Error creating request: %v", err)
 	}
-	req.Header.Set("Authorization", "Bearer " + token)
+	req.Header.Set("Authorization", "Bearer "+w.token)
 	req.Header.Set("Content-Type", "application/json")
 
 	var result map[string]interface{}
 
-	resp, err := netClient.Do(req)
+	resp, err := w.client.Do(req)
 	if err != nil {
 		return make([]*Tag, 0), err
 	}
 	defer resp.Body.Close()
 
-
 	if resp.StatusCode != 200 {
-	    return nil, fmt.Errorf("Got status code %d", resp.StatusCode)
+		return nil, fmt.Errorf("Got status code %d", resp.StatusCode)
 	}
 
 	dec := json.NewDecoder(resp.Body)
@@ -81,15 +90,15 @@ func Get(token string, domain string, since time.Time) ([]*Tag, error) {
 	}
 
 	metrics := make(map[int]MetricsCollection)
-	if err := getMetric(token, domain, temperatureTags, TYPE_TEMPERATURE, metrics, since); err != nil {
+	if err := w.getMetric(temperatureTags, TYPE_TEMPERATURE, metrics, since); err != nil {
 		return nil, err
 	}
 
-	if err := getMetric(token, domain, humidityTags, TYPE_HUMIDITY, metrics, since); err != nil {
+	if err := w.getMetric(humidityTags, TYPE_HUMIDITY, metrics, since); err != nil {
 		return nil, err
 	}
 
-	if err := getMetric(token, domain, lightTags, TYPE_LUX, metrics, since); err != nil {
+	if err := w.getMetric(lightTags, TYPE_LUX, metrics, since); err != nil {
 		return nil, err
 	}
 
@@ -128,10 +137,7 @@ func NiceType(t string) string {
 	}
 }
 
-func getMetric(token, domain string, ids []int, metricType string, metrics map[int]MetricsCollection, since time.Time) error {
-	var netClient = &http.Client{
-		Timeout: time.Second * 10,
-	}
+func (w *WirelessTags) getMetric(ids []int, metricType string, metrics map[int]MetricsCollection, since time.Time) error {
 
 	input := &GetMultiTagStatsRawInput{
 		IDs:      ids,
@@ -145,14 +151,14 @@ func getMetric(token, domain string, ids []int, metricType string, metrics map[i
 		return err
 	}
 
-	req, err := http.NewRequest("POST", domain+"/ethLogs.asmx/GetMultiTagStatsRaw", bytes.NewBuffer(requestBody))
+	req, err := http.NewRequest("POST", w.domain+"/ethLogs.asmx/GetMultiTagStatsRaw", bytes.NewBuffer(requestBody))
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", "Bearer " + token)
+	req.Header.Set("Authorization", "Bearer "+w.token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := netClient.Do(req)
+	resp, err := w.client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -179,7 +185,7 @@ func getMetric(token, domain string, ids []int, metricType string, metrics map[i
 	}
 
 	if err := json.Unmarshal(b, &result); err != nil {
-		return fmt.Errorf("Error decoding json response for Data %v", err)
+		return fmt.Errorf("error decoding JSON response %s: %v", resp.Request.URL, err)
 	}
 
 	auckland, err := time.LoadLocation("Pacific/Auckland")

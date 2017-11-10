@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"strings"
 
@@ -19,10 +20,15 @@ func TestGet(t *testing.T) {
 		if strings.Contains(r.URL.String(), "LoadTempSensorConfig") {
 			http.ServeFile(w, r, "testdata/LoadTempSensorConfig.json")
 		}
+		if strings.Contains(r.URL.String(), "GetMultiTagStatsRaw") {
+			http.ServeFile(w, r, "testdata/GetMultiTagStatsRaw_temperature.json")
+		}
 	}))
 	defer ts.Close()
 
-	tags, err := wirelesstags.Get(ts.URL)
+	client := &http.Client{}
+	wt := wirelesstags.New(client, ts.URL, "")
+	tags, err := wt.Get(time.Now())
 	if err != nil {
 		t.Error(err)
 		return
@@ -33,9 +39,4 @@ func TestGet(t *testing.T) {
 		t.Errorf("Expected %d tags, got %d tags", actual, expected)
 		return
 	}
-
-	// {'ids': [1], 'type': 'temperature', 'fromDate': '10/15/2017', 'toDate': '10/16/2017'}
-	// {'ids': [1], 'type': 'light', 'fromDate': '10/15/2017', 'toDate': '10/16/2017'}
-	// {'ids': [1], 'type': 'cap', 'fromDate': '10/15/2017', 'toDate': '10/16/2017'}
-	// {'ids': [1], 'type': 'motion', 'fromDate': '10/15/2017', 'toDate': '10/16/2017'}
 }

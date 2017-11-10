@@ -1,14 +1,21 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log"
-    "os"
+	"net/http"
+	"os"
 	"time"
 
-	client "github.com/influxdata/influxdb/client/v2"
+	influx "github.com/influxdata/influxdb/client/v2"
 	"github.com/stojg/grabber/lib/wirelesstags"
+)
 
+var (
+	netClient *http.Client
+	pool      *x509.CertPool
 )
 
 const (
@@ -16,6 +23,12 @@ const (
 	username = "bubba"
 	password = "bumblebeetuna"
 )
+
+func init() {
+	pool = x509.NewCertPool()
+	pool.AppendCertsFromPEM(pemCerts)
+	netClient = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+}
 
 func main() {
 	lastUpdated := time.Now().Add(-24 * time.Hour)
@@ -31,19 +44,23 @@ func main() {
 
 func update(lastUpdated time.Time) {
 
-    token := os.Getenv("GRABBER_WIRELESSTAG_TOKEN")
-    if token == "" {
-        fmt.Println("Need GRABBER_WIRELESSTAG_TOKEN")
-        os.Exit(1)
-    }
+	token := os.Getenv("GRABBER_WIRELESSTAG_TOKEN")
+	if token == "" {
+		fmt.Println("Requires env variable 'GRABBER_WIRELESSTAG_TOKEN'")
+	}
 
 	influxdbHost := os.Getenv("GRABBER_INFLUX_URL")
 	if influxdbHost == "" {
-		fmt.Println("Need GRABBER_INFLUX_URL")
+		fmt.Println("Requires env variable 'GRABBER_INFLUX_URL'")
+	}
+
+	if token == "" || influxdbHost == "" {
 		os.Exit(1)
 	}
 
-	tags, err := wirelesstags.Get(token, "https://www.mytaglist.com", lastUpdated)
+	wirelessTags := wirelesstags.New(netClient, "https://www.mytaglist.com", token)
+
+	tags, err := wirelessTags.Get(lastUpdated)
 	if err != nil {
 		log.Printf("Error: %v\n", err)
 		return
@@ -51,7 +68,7 @@ func update(lastUpdated time.Time) {
 
 	fmt.Printf("Updated %d tags\n", len(tags))
 
-	c, err := client.NewHTTPClient(client.HTTPConfig{
+	c, err := influx.NewHTTPClient(influx.HTTPConfig{
 		Addr:     influxdbHost,
 		Username: username,
 		Password: password,
@@ -63,7 +80,7 @@ func update(lastUpdated time.Time) {
 	}
 
 	// Create a new point batch
-	bp, err := client.NewBatchPoints(client.BatchPointsConfig{
+	bp, err := influx.NewBatchPoints(influx.BatchPointsConfig{
 		Database:  MyDB,
 		Precision: "s",
 	})
@@ -80,7 +97,7 @@ func update(lastUpdated time.Time) {
 		}
 
 		for ts, metrics := range tag.Metrics {
-			pt, err := client.NewPoint("sensors", metricTags, metrics, ts)
+			pt, err := influx.NewPoint("sensors", metricTags, metrics, ts)
 			if err != nil {
 				log.Printf("Error: %v\n", err)
 				return
