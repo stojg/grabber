@@ -18,12 +18,6 @@ var (
 	pool      *x509.CertPool
 )
 
-const (
-	MyDB     = "mydb"
-	username = "bubba"
-	password = "bumblebeetuna"
-)
-
 func init() {
 	pool = x509.NewCertPool()
 	pool.AppendCertsFromPEM(pemCerts)
@@ -39,22 +33,36 @@ func main() {
 		update(lastUpdated)
 		lastUpdated = time.Now()
 	}
-
 }
 
 func update(lastUpdated time.Time) {
 
-	token := os.Getenv("GRABBER_WIRELESSTAG_TOKEN")
+	token := os.Getenv("GRABBER_TAG_TOKEN")
 	if token == "" {
-		fmt.Println("Requires env variable 'GRABBER_WIRELESSTAG_TOKEN'")
+		fmt.Println("Requires env variable 'GRABBER_TAG_TOKEN'")
 	}
 
-	influxdbHost := os.Getenv("GRABBER_INFLUX_URL")
-	if influxdbHost == "" {
-		fmt.Println("Requires env variable 'GRABBER_INFLUX_URL'")
+	influxHost := os.Getenv("GRABBER_INFLUX_HOST")
+	if influxHost == "" {
+		fmt.Println("Requires env variable 'GRABBER_INFLUX_HOST'")
 	}
 
-	if token == "" || influxdbHost == "" {
+	influxDB := os.Getenv("GRABBER_INFLUX_DB")
+	if influxHost == "" {
+		fmt.Println("Requires env variable 'GRABBER_INFLUX_DB'")
+	}
+
+	influxUser := os.Getenv("GRABBER_INFLUX_USER")
+	if influxHost == "" {
+		fmt.Println("Requires env variable 'GRABBER_INFLUX_USER'")
+	}
+
+	influxPassword := os.Getenv("GRABBER_INFLUX_PASSWORD")
+	if influxHost == "" {
+		fmt.Println("Requires env variable 'GRABBER_INFLUX_PASSWORD'")
+	}
+
+	if token == "" || influxHost == "" || influxDB == "" {
 		os.Exit(1)
 	}
 
@@ -69,9 +77,9 @@ func update(lastUpdated time.Time) {
 	fmt.Printf("Updated %d tags\n", len(tags))
 
 	c, err := influx.NewHTTPClient(influx.HTTPConfig{
-		Addr:     influxdbHost,
-		Username: username,
-		Password: password,
+		Addr:     influxHost,
+		Username: influxUser,
+		Password: influxPassword,
 	})
 
 	if err != nil {
@@ -81,7 +89,7 @@ func update(lastUpdated time.Time) {
 
 	// Create a new point batch
 	bp, err := influx.NewBatchPoints(influx.BatchPointsConfig{
-		Database:  MyDB,
+		Database:  influxDB,
 		Precision: "s",
 	})
 	if err != nil {
