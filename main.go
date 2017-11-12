@@ -25,17 +25,24 @@ func init() {
 }
 
 func main() {
-	lastUpdated := time.Now().Add(-24 * time.Hour)
-	update(lastUpdated)
+
+	loc, err := time.LoadLocation("Pacific/Auckland")
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	lastUpdated := time.Now().In(loc).Add(-24 * time.Hour)
+	update(lastUpdated, loc)
 	lastUpdated = time.Now()
 	ticker := time.NewTicker(time.Minute * 5)
 	for range ticker.C {
-		update(lastUpdated)
-		lastUpdated = time.Now()
+		update(lastUpdated, loc)
+		lastUpdated = time.Now().In(loc)
 	}
 }
 
-func update(lastUpdated time.Time) {
+func update(lastUpdated time.Time, location *time.Location) {
 
 	token := os.Getenv("GRABBER_TAG_TOKEN")
 	if token == "" {
@@ -66,7 +73,7 @@ func update(lastUpdated time.Time) {
 		os.Exit(1)
 	}
 
-	wirelessTags := wirelesstags.New(netClient, "https://www.mytaglist.com", token)
+	wirelessTags := wirelesstags.New(netClient, "https://www.mytaglist.com", token, location)
 
 	tags, err := wirelessTags.Get(lastUpdated)
 	if err != nil {

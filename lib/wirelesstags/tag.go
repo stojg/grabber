@@ -20,11 +20,12 @@ const (
 	TYPE_SIGNAL      = "signal"
 )
 
-func New(client *http.Client, domain, token string) *WirelessTags {
+func New(client *http.Client, domain, token string, location *time.Location) *WirelessTags {
 	return &WirelessTags{
 		client: client,
 		domain: domain,
 		token:  token,
+		location: location,
 	}
 }
 
@@ -32,6 +33,7 @@ type WirelessTags struct {
 	client *http.Client
 	domain string
 	token  string
+	location *time.Location
 }
 
 func (w *WirelessTags) Get(since time.Time) ([]*Tag, error) {
@@ -143,7 +145,7 @@ func (w *WirelessTags) getMetric(ids []int, metricType string, metrics map[int]M
 		IDs:      ids,
 		Type:     metricType,
 		FromDate: since.Format("1/2/2006"),
-		ToDate:   time.Now().Format("1/2/2006"),
+		ToDate:   time.Now().In(w.location).Format("1/2/2006"),
 	}
 
 	requestBody, err := json.Marshal(input)
