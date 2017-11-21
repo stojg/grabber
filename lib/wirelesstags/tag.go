@@ -41,7 +41,7 @@ func (w *WirelessTags) Get(since time.Time) ([]*Tag, error) {
 	var body = []byte(`{}`)
 	req, err := http.NewRequest("POST", w.domain+"/ethClient.asmx/GetTagList2", bytes.NewBuffer(body))
 	if err != nil {
-		return nil, fmt.Errorf("Error creating request: %v", err)
+		return nil, fmt.Errorf("error creating request: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+w.token)
 	req.Header.Set("Content-Type", "application/json")
@@ -50,22 +50,22 @@ func (w *WirelessTags) Get(since time.Time) ([]*Tag, error) {
 
 	resp, err := w.client.Do(req)
 	if err != nil {
-		return make([]*Tag, 0), err
+		return make([]*Tag, 0), fmt.Errorf("error during tag GetTagList2: %v", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Got status code %d", resp.StatusCode)
+		return nil, fmt.Errorf("got status code %d", resp.StatusCode)
 	}
 
 	dec := json.NewDecoder(resp.Body)
 	if err := dec.Decode(&result); err != nil {
-		return make([]*Tag, 0), fmt.Errorf("Error parsing json response %v", err)
+		return make([]*Tag, 0), fmt.Errorf("error parsing json response %v", err)
 	}
 
 	var tags []*Tag
 	if err := mapstructure.Decode(result["d"], &tags); err != nil {
-		return nil, fmt.Errorf("Error while decoding tag data: %v", err)
+		return nil, fmt.Errorf("error while decoding tag data: %v", err)
 	}
 
 	var temperatureTags []int
@@ -140,6 +140,10 @@ func NiceType(t string) string {
 }
 
 func (w *WirelessTags) getMetric(ids []int, metricType string, metrics map[int]MetricsCollection, since time.Time) error {
+
+	if len(ids) == 0 {
+		return nil
+	}
 
 	input := &GetMultiTagStatsRawInput{
 		IDs:      ids,

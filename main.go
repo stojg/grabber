@@ -69,7 +69,7 @@ func update(lastUpdated time.Time, location *time.Location) {
 		fmt.Println("Requires env variable 'GRABBER_INFLUX_PASSWORD'")
 	}
 
-	if token == "" || influxHost == "" || influxDB == "" {
+	if token == ""  {
 		os.Exit(1)
 	}
 
@@ -77,11 +77,15 @@ func update(lastUpdated time.Time, location *time.Location) {
 
 	tags, err := wirelessTags.Get(lastUpdated)
 	if err != nil {
-		log.Printf("Error: %v\n", err)
+		log.Printf("Error on tag update: %v\n", err)
 		return
 	}
 
 	fmt.Printf("Updated %d tags\n", len(tags))
+
+	if influxHost == "" || influxDB == "" {
+		os.Exit(1)
+	}
 
 	c, err := influx.NewHTTPClient(influx.HTTPConfig{
 		Addr:     influxHost,
@@ -108,7 +112,6 @@ func update(lastUpdated time.Time, location *time.Location) {
 	for _, tag := range tags {
 		metricTags := map[string]string{
 			"tag":      tag.Name,
-			"location": "16moir",
 		}
 
 		for ts, metrics := range tag.Metrics {
