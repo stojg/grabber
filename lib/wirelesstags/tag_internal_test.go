@@ -17,11 +17,11 @@ func TestGet(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	wt := New(&http.Client{}, ts.URL, "")
+	wt := New(&http.Client{}, ts.URL, "", time.Local)
 
 	since := time.Date(2017, time.October, 15, 15, 0, 0, 0, time.Local)
 	metrics := make(map[int]MetricsCollection)
-	err := wt.getMetric([]int{3, 1}, TYPE_TEMPERATURE, metrics, since)
+	err := wt.getMetric([]int{3, 1}, typeTemperature, metrics, since)
 	if err != nil {
 		t.Error(err)
 		return
@@ -40,5 +40,14 @@ func TestGet(t *testing.T) {
 	if len(metrics[3]) != 38 {
 		t.Errorf("Expected %d metrics for tag 3, got %d", 38, len(metrics[3]))
 		return
+	}
+}
+
+func TestWindowFileTime(t *testing.T) {
+	actual := windowsFileTime(131557748239379584)
+	expected := time.Unix(1511301223, 937000000)
+
+	if actual != expected {
+		t.Errorf("Expected %s, got %s", expected, actual)
 	}
 }

@@ -69,7 +69,7 @@ func update(lastUpdated time.Time, location *time.Location) {
 		fmt.Println("Requires env variable 'GRABBER_INFLUX_PASSWORD'")
 	}
 
-	if token == ""  {
+	if token == "" {
 		os.Exit(1)
 	}
 
@@ -111,7 +111,7 @@ func update(lastUpdated time.Time, location *time.Location) {
 	// Create a point and add to batch
 	for _, tag := range tags {
 		metricTags := map[string]string{
-			"tag":      tag.Name,
+			"tag": tag.Name,
 		}
 
 		for ts, metrics := range tag.Metrics {
@@ -126,7 +126,7 @@ func update(lastUpdated time.Time, location *time.Location) {
 
 	// Write the batch
 	if err := c.Write(bp); err != nil {
-		log.Printf("Error: %v\n", err)
+		//log.Printf("Error: %v\n", err)
 		return
 	}
 	fmt.Printf("Wrote %d metric points\n", len(bp.Points()))

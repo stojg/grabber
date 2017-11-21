@@ -27,7 +27,7 @@ func TestGet(t *testing.T) {
 	defer ts.Close()
 
 	client := &http.Client{}
-	wt := wirelesstags.New(client, ts.URL, "")
+	wt := wirelesstags.New(client, ts.URL, "", time.Local)
 	tags, err := wt.Get(time.Now())
 	if err != nil {
 		t.Error(err)
