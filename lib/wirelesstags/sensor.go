@@ -1,7 +1,12 @@
 package wirelesstags
 
-// Tag represents a single sensor tag with the information provided from the API. The metrics can be found at Tag.Metrics
-type Tag struct {
+import (
+	"fmt"
+	"strings"
+)
+
+// Sensor represents a single sensor tag with the information provided from the API. The metrics can be found at Sensor.Metrics
+type Sensor struct {
 	Name                string  `json:"name"`
 	Comment             string  `json:"comment"`
 	TempEventState      int     `json:"tempEventState"` // Disarmed, TooLow, TooHigh, Normal
@@ -46,54 +51,72 @@ type Tag struct {
 	Metrics MetricsCollection
 }
 
-func (t *Tag) hasMotionSensor() bool {
-	return inArray(t.TagType, []int{12, 13, 21})
+// Labels returns a map of key / value. 'name' and 'id' is always returned. The extra labels are added to the comment
+// field in the UI and follows the name1=value1,name2=value2 format. It should be relatively resilient to whitespaces.
+func (s *Sensor) Labels() map[string]string {
+	labels := make(map[string]string)
+	labels["name"] = s.Name
+	labels["id"] = fmt.Sprintf("%d", s.SlaveID)
+	extraLabels := strings.Split(s.Comment, ",")
+	for _, extra := range extraLabels {
+		keyValues := strings.Split(extra, "=")
+		if len(keyValues) != 2 {
+			continue
+		}
+		key := strings.Trim(keyValues[0], " ")
+		labels[key] = strings.Trim(keyValues[1], " ")
+	}
+	return labels
 }
 
-func (t *Tag) hasLightSensor() bool {
-	return inArray(t.TagType, []int{26})
+func (s *Sensor) hasMotionSensor() bool {
+	return inArray(s.TagType, []int{12, 13, 21})
 }
 
-func (t *Tag) hasMoistureSensor() bool {
-	return inArray(t.TagType, []int{32, 33})
+func (s *Sensor) hasLightSensor() bool {
+	return inArray(s.TagType, []int{26})
 }
 
-func (t *Tag) hasWaterSensor() bool {
-	return inArray(t.TagType, []int{32, 33})
+func (s *Sensor) hasMoistureSensor() bool {
+	return inArray(s.TagType, []int{32, 33})
 }
 
-func (t *Tag) hasReedSensor() bool {
-	return inArray(t.TagType, []int{52, 53})
+func (s *Sensor) hasWaterSensor() bool {
+	return inArray(s.TagType, []int{32, 33})
 }
 
-func (t *Tag) hasPIRSensor() bool {
-	return inArray(t.TagType, []int{72})
+func (s *Sensor) hasReedSensor() bool {
+	return inArray(s.TagType, []int{52, 53})
 }
 
-func (t *Tag) hasEventSensor() bool {
-	return t.hasMotionSensor() || t.hasLightSensor() || t.hasReedSensor() || t.hasPIRSensor()
+func (s *Sensor) hasPIRSensor() bool {
+	return inArray(s.TagType, []int{72})
 }
 
-func (t *Tag) hasHumiditySensor() bool {
-	return t.hasHTU()
+func (s *Sensor) hasEventSensor() bool {
+	return s.hasMotionSensor() || s.hasLightSensor() || s.hasReedSensor() || s.hasPIRSensor()
 }
 
-func (t *Tag) hasTempSensor() bool {
-	return !inArray(t.TagType, []int{82, 92})
+func (s *Sensor) hasHumiditySensor() bool {
+	return s.hasHTU()
 }
 
-func (t *Tag) hasCurrentSensor() bool {
-	return t.TagType == 42
+func (s *Sensor) hasTempSensor() bool {
+	return !inArray(s.TagType, []int{82, 92})
+}
+
+func (s *Sensor) hasCurrentSensor() bool {
+	return s.TagType == 42
 }
 
 /** Whether the tag's temperature sensor is high-precision (> 8-bit). */
-func (t *Tag) hasHTU() bool {
-	return inArray(t.TagType, []int{13, 21, 52, 26, 72})
+func (s *Sensor) hasHTU() bool {
+	return inArray(s.TagType, []int{13, 21, 52, 26, 72})
 }
 
 // can playback data that was recorded while being offline
-func (t *Tag) canPlayback() bool {
-	return t.TagType == 21
+func (s *Sensor) canPlayback() bool {
+	return s.TagType == 21
 }
 
 func inArray(needle int, haystack []int) bool {

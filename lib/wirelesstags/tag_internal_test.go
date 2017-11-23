@@ -21,7 +21,7 @@ func TestGet(t *testing.T) {
 
 	since := time.Date(2017, time.October, 15, 15, 0, 0, 0, time.Local)
 	metrics := make(map[int]MetricsCollection)
-	err := wt.getMetric([]int{3, 1}, typeTemperature, metrics, since)
+	err := wt.updateMetrics([]int{3, 1}, typeTemperature, metrics, since)
 	if err != nil {
 		t.Error(err)
 		return

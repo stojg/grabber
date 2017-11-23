@@ -28,15 +28,47 @@ func TestGet(t *testing.T) {
 
 	client := &http.Client{}
 	wt := wirelesstags.New(client, ts.URL, "", time.Local)
-	tags, err := wt.Get(time.Now())
+	sensors, err := wt.Get(time.Now())
 	if err != nil {
 		t.Error(err)
 		return
 	}
 	expected := 10
-	actual := len(tags)
+	actual := len(sensors)
 	if actual != expected {
-		t.Errorf("Expected %d tags, got %d tags", actual, expected)
+		t.Errorf("Expected %d sensors, got %d sensors", actual, expected)
 		return
+	}
+
+	sensor := sensors[5]
+	expectedComment := "location=bath,level=5,num=3"
+	if sensor.Comment != expectedComment {
+		t.Errorf("Expected tag comment to be '%s', got '%s'", expectedComment, sensor.Comment)
+	}
+}
+
+func TestSensorTags(t *testing.T) {
+	s := &wirelesstags.Sensor{
+		Name:    "My Room",
+		SlaveID: 3,
+		Comment: "location=bath ,level =5, color=yellow ",
+	}
+
+	labels := s.Labels()
+	if len(labels) != 5 {
+		t.Errorf("Expected sensor to have 5 labels, got %d", len(labels))
+	}
+
+	expected := make(map[string]string)
+	expected["name"] = s.Name
+	expected["id"] = "3"
+	expected["location"] = "bath"
+	expected["level"] = "5"
+	expected["color"] = "yellow"
+
+	for label, value := range expected {
+		if labels[label] != value {
+			t.Errorf("Expected label '%s' to be '%s', got '%s'", label, value, labels[label])
+		}
 	}
 }

@@ -59,8 +59,8 @@ type WirelessTags struct {
 	location *time.Location
 }
 
-// Get all sensor data and return a list of Tag
-func (w *WirelessTags) Get(since time.Time) ([]*Tag, error) {
+// Get all sensor data and return a list of Sensor
+func (w *WirelessTags) Get(since time.Time) ([]*Sensor, error) {
 
 	var body = []byte(`{}`)
 	req, err := http.NewRequest("POST", w.domain+"/ethClient.asmx/GetTagList2", bytes.NewBuffer(body))
@@ -74,7 +74,7 @@ func (w *WirelessTags) Get(since time.Time) ([]*Tag, error) {
 
 	var resp *http.Response
 	if resp, err = w.client.Do(req); err != nil {
-		return make([]*Tag, 0), fmt.Errorf("error during tag GetTagList2: %v", err)
+		return make([]*Sensor, 0), fmt.Errorf("error during tag GetTagList2: %v", err)
 	}
 	defer closer(resp.Body)
 
@@ -84,10 +84,10 @@ func (w *WirelessTags) Get(since time.Time) ([]*Tag, error) {
 
 	dec := json.NewDecoder(resp.Body)
 	if err = dec.Decode(&result); err != nil {
-		return make([]*Tag, 0), fmt.Errorf("error parsing json response %v", err)
+		return make([]*Sensor, 0), fmt.Errorf("error parsing json response %v", err)
 	}
 
-	var tags []*Tag
+	var tags []*Sensor
 	if err = mapstructure.Decode(result["d"], &tags); err != nil {
 		return nil, fmt.Errorf("error while decoding tag data: %v", err)
 	}
@@ -115,16 +115,17 @@ func (w *WirelessTags) Get(since time.Time) ([]*Tag, error) {
 		}
 	}
 
+	// the metrics are keyed by the sensors slaveID
 	metrics := make(map[int]MetricsCollection)
-	if err = w.getMetric(temperatureTags, typeTemperature, metrics, since); err != nil {
+	if err = w.updateMetrics(temperatureTags, typeTemperature, metrics, since); err != nil {
 		return nil, err
 	}
 
-	if err = w.getMetric(humidityTags, typeHumidity, metrics, since); err != nil {
+	if err = w.updateMetrics(humidityTags, typeHumidity, metrics, since); err != nil {
 		return nil, err
 	}
 
-	if err = w.getMetric(lightTags, typeLux, metrics, since); err != nil {
+	if err = w.updateMetrics(lightTags, typeLux, metrics, since); err != nil {
 		return nil, err
 	}
 
@@ -158,45 +159,28 @@ func windowsFileTime(intervals int64) time.Time {
 	return time.Unix(int64(sec), int64(nsec))
 }
 
-func (w *WirelessTags) getMetric(ids []int, metricType string, metrics map[int]MetricsCollection, since time.Time) error {
+func (w *WirelessTags) updateMetrics(ids []int, metricType string, metrics map[int]MetricsCollection, since time.Time) error {
 
 	if len(ids) == 0 {
 		return nil
 	}
 
-	input := &getMultiTagStatsRawInput{
-		IDs:      ids,
-		Type:     metricType,
-		FromDate: since.Format("1/2/2006"),
-		ToDate:   time.Now().In(w.location).Format("1/2/2006"),
-	}
-
-	requestBody, err := json.Marshal(input)
-	if err != nil {
-		return err
-	}
-
-	req, err := http.NewRequest("POST", w.domain+"/ethLogs.asmx/GetMultiTagStatsRaw", bytes.NewBuffer(requestBody))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+w.token)
-	req.Header.Set("Content-Type", "application/json")
-
 	var resp *http.Response
-	if resp, err = w.client.Do(req); err != nil {
+	var err error
+	if resp, err = w.requestMetrics(ids, metricType, since); err != nil {
 		return err
 	}
+
 	defer closer(resp.Body)
 
-	var b []byte
-	if b, err = ioutil.ReadAll(resp.Body); err != nil {
+	var body []byte
+	if body, err = ioutil.ReadAll(resp.Body); err != nil {
 		return err
 	}
 
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		var message message
-		if err = json.Unmarshal(b, &message); err != nil {
+		if err = json.Unmarshal(body, &message); err != nil {
 			return err
 		}
 		return fmt.Errorf("%s", message.Message)
@@ -209,7 +193,7 @@ func (w *WirelessTags) getMetric(ids []int, metricType string, metrics map[int]M
 		Names    []string `json:"names"`
 	}
 
-	if err = json.Unmarshal(b, &result); err != nil {
+	if err = json.Unmarshal(body, &result); err != nil {
 		return fmt.Errorf("error decoding JSON response %s: %v", resp.Request.URL, err)
 	}
 
@@ -244,6 +228,29 @@ func (w *WirelessTags) getMetric(ids []int, metricType string, metrics map[int]M
 	}
 
 	return nil
+}
+
+func (w *WirelessTags) requestMetrics(ids []int, metricType string, since time.Time) (*http.Response, error) {
+	input := &getMultiTagStatsRawInput{
+		IDs:      ids,
+		Type:     metricType,
+		FromDate: since.Format("1/2/2006"),
+		ToDate:   time.Now().In(w.location).Format("1/2/2006"),
+	}
+
+	requestBody, err := json.Marshal(input)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", w.domain+"/ethLogs.asmx/GetMultiTagStatsRaw", bytes.NewBuffer(requestBody))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+w.token)
+	req.Header.Set("Content-Type", "application/json")
+
+	return w.client.Do(req)
 }
 
 // Metric are typically something like this metric["temperature"] = 19.0
