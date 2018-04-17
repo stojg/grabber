@@ -100,7 +100,6 @@ func update(lastUpdated time.Time, location *time.Location) {
 
 	// Create a point and add to batch
 	for _, tag := range tags {
-		fmt.Printf("add point: %v\n", tag.Labels())
 		for ts, metrics := range tag.Metrics {
 			pt, err := influx.NewPoint("sensors", tag.Labels(), metrics, ts)
 			if err != nil {
