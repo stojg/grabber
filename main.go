@@ -94,16 +94,17 @@ func update(lastUpdated time.Time, location *time.Location) {
 		Precision: "s",
 	})
 	if err != nil {
-		log.Printf("Error: %v\n", err)
+		fmt.Printf("Error: %v\n", err)
 		return
 	}
 
 	// Create a point and add to batch
 	for _, tag := range tags {
+		fmt.Printf("add point: %v\n", tag.Labels())
 		for ts, metrics := range tag.Metrics {
 			pt, err := influx.NewPoint("sensors", tag.Labels(), metrics, ts)
 			if err != nil {
-				log.Printf("Error: %v\n", err)
+				fmt.Printf("Error: %v\n", err)
 				return
 			}
 			bp.AddPoint(pt)
@@ -117,12 +118,12 @@ func update(lastUpdated time.Time, location *time.Location) {
 	})
 
 	if err != nil {
-		log.Printf("Error: %v\n", err)
+		fmt.Printf("Error: %v\n", err)
 		return
 	}
 	// Write the batch
 	if err := c.Write(bp); err != nil {
-		log.Printf("Error: %v\n", err)
+		fmt.Printf("Error: %v\n", err)
 		return
 	}
 	fmt.Printf("Wrote %d metric points\n", len(bp.Points()))
