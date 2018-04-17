@@ -81,21 +81,11 @@ func update(lastUpdated time.Time, location *time.Location) {
 		return
 	}
 
-	fmt.Printf("Updated %d tags\n", len(tags))
+	fmt.Printf("got data for %d tags from mytaglist.com\n", len(tags))
 
 	if influxHost == "" || influxDB == "" {
+		fmt.Println("no influxHost or influxDB, quitting")
 		os.Exit(1)
-	}
-
-	c, err := influx.NewHTTPClient(influx.HTTPConfig{
-		Addr:     influxHost,
-		Username: influxUser,
-		Password: influxPassword,
-	})
-
-	if err != nil {
-		log.Printf("Error: %v\n", err)
-		return
 	}
 
 	// Create a new point batch
@@ -120,9 +110,19 @@ func update(lastUpdated time.Time, location *time.Location) {
 		}
 	}
 
+	c, err := influx.NewHTTPClient(influx.HTTPConfig{
+		Addr:     influxHost,
+		Username: influxUser,
+		Password: influxPassword,
+	})
+
+	if err != nil {
+		log.Printf("Error: %v\n", err)
+		return
+	}
 	// Write the batch
 	if err := c.Write(bp); err != nil {
-		//log.Printf("Error: %v\n", err)
+		log.Printf("Error: %v\n", err)
 		return
 	}
 	fmt.Printf("Wrote %d metric points\n", len(bp.Points()))
