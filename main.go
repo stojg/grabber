@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"time"
@@ -16,6 +15,10 @@ import (
 var (
 	netClient *http.Client
 	pool      *x509.CertPool
+)
+
+const (
+	maxBatch = 1000
 )
 
 func init() {
@@ -33,16 +36,20 @@ func main() {
 	}
 
 	lastUpdated := time.Now().In(loc).Add(-24 * time.Hour)
-	update(lastUpdated, loc)
+	if err := update(lastUpdated, loc); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %s\n", err)
+	}
 	lastUpdated = time.Now()
 	ticker := time.NewTicker(time.Minute * 5)
 	for range ticker.C {
-		update(lastUpdated, loc)
+		if err := update(lastUpdated, loc); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+		}
 		lastUpdated = time.Now().In(loc)
 	}
 }
 
-func update(lastUpdated time.Time, location *time.Location) {
+func update(lastUpdated time.Time, location *time.Location) error {
 
 	token := os.Getenv("GRABBER_TAG_TOKEN")
 	if token == "" {
@@ -77,38 +84,10 @@ func update(lastUpdated time.Time, location *time.Location) {
 
 	tags, err := wirelessTags.Get(lastUpdated)
 	if err != nil {
-		log.Printf("Error on tag update: %v\n", err)
-		return
+		return fmt.Errorf("error on tag update: %v", err)
 	}
 
-	fmt.Printf("got data for %d tags from mytaglist.com\n", len(tags))
-
-	if influxHost == "" || influxDB == "" {
-		fmt.Println("no influxHost or influxDB, quitting")
-		os.Exit(1)
-	}
-
-	// Create a new point batch
-	bp, err := influx.NewBatchPoints(influx.BatchPointsConfig{
-		Database:  influxDB,
-		Precision: "s",
-	})
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
-	}
-
-	// Create a point and add to batch
-	for _, tag := range tags {
-		for ts, metrics := range tag.Metrics {
-			pt, err := influx.NewPoint("sensors", tag.Labels(), metrics, ts)
-			if err != nil {
-				fmt.Printf("Error: %v\n", err)
-				return
-			}
-			bp.AddPoint(pt)
-		}
-	}
+	fmt.Printf("read metrics for %d tags from mytaglist.com\n", len(tags))
 
 	c, err := influx.NewHTTPClient(influx.HTTPConfig{
 		Addr:     influxHost,
@@ -117,13 +96,65 @@ func update(lastUpdated time.Time, location *time.Location) {
 	})
 
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
+		return fmt.Errorf("error: %v", err)
 	}
-	// Write the batch
+
+	// Create a new point batch
+	bp := getNewPointBatch(influxDB)
+
+	for _, tag := range tags {
+		for ts, metrics := range tag.Metrics {
+			wrote, err := addPoint(c, bp, tag.Labels(), metrics, ts)
+			if err != nil {
+				return err
+			}
+			if wrote {
+				bp = getNewPointBatch(influxDB)
+			}
+		}
+	}
+
+	return writePoints(c, bp)
+}
+
+func addPoint(c influx.Client, bp influx.BatchPoints, tags map[string]string, metrics map[string]interface{}, ts time.Time) (bool, error) {
+	pt, err := influx.NewPoint("sensors", tags, metrics, ts)
+	if err != nil {
+		return false, fmt.Errorf("error: %v", err)
+	}
+	bp.AddPoint(pt)
+
+	if len(bp.Points()) >= maxBatch {
+		if err := writePoints(c, bp); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func writePoints(c influx.Client, bp influx.BatchPoints) error {
+	if len(bp.Points()) == 0 {
+		return nil
+	}
+
 	if err := c.Write(bp); err != nil {
-		fmt.Printf("Error: %v\n", err)
-		return
+		return fmt.Errorf("database write error: %v", err)
 	}
-	fmt.Printf("Wrote %d metric points\n", len(bp.Points()))
+
+	return nil
+}
+
+func getNewPointBatch(influxDB string) influx.BatchPoints {
+
+	// Create a new point batch
+	bp, err := influx.NewBatchPoints(influx.BatchPointsConfig{
+		Database:  influxDB,
+		Precision: "s",
+	})
+	// it will only fail it it can't parse the duration
+	if err != nil {
+		panic(err)
+	}
+	return bp
 }
