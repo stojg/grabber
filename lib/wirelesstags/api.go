@@ -10,6 +10,8 @@ import (
 
 	"io"
 
+	"strings"
+
 	"github.com/mitchellh/mapstructure"
 )
 
@@ -92,15 +94,16 @@ func (w *WirelessTags) Get(since time.Time) ([]*Sensor, error) {
 		return nil, fmt.Errorf("error while decoding tag data: %v", err)
 	}
 
-	var temperatureTags []int
-	var lightTags []int
-	var humidityTags []int
+	var temperatureTags []uint8
+	var lightTags []uint8
+	var humidityTags []uint8
 
 	for _, t := range tags {
 
 		lastConn := windowsFileTime(t.LastComm)
 
-		if lastConn.Before(since) {
+		// we want to ensure that tags that reported since last time will get their new metrics in
+		if lastConn.Before(since) && !t.OutOfRange {
 			since = lastConn
 		}
 
@@ -116,7 +119,7 @@ func (w *WirelessTags) Get(since time.Time) ([]*Sensor, error) {
 	}
 
 	// the metrics are keyed by the sensors slaveID
-	metrics := make(map[int]MetricsCollection)
+	metrics := make(map[uint8]MetricsCollection)
 	if err = w.updateMetrics(temperatureTags, typeTemperature, metrics, since); err != nil {
 		return nil, err
 	}
@@ -138,28 +141,7 @@ func (w *WirelessTags) Get(since time.Time) ([]*Sensor, error) {
 	return tags, err
 }
 
-// windowsFileTime returns the windows FILETIME value in Unix time.
-//  - Windows FILETIME is 100 nanosecond intervals since January 1, 1601 (UTC)
-//  - Unix Date time is seconds since January 1, 1970 (UTC)
-//  - Offset between the two epochs in milliseconds is 116444736e+5
-// Note that the smallest return resolution is milliseconds
-func windowsFileTime(intervals int64) time.Time {
-	// we need to convert 100ns intervals to ms so we don't overflow on int64
-	var ms = intervals / 10 / 1000
-
-	// offset between windows epoch and unix epoch in milliseconds
-	var epochOffset int64 = 116444736e+5
-
-	// millisecond since unix epoch start
-	var unix = time.Millisecond * time.Duration(ms-epochOffset)
-
-	sec := unix / time.Second
-	nsec := unix % time.Second
-
-	return time.Unix(int64(sec), int64(nsec))
-}
-
-func (w *WirelessTags) updateMetrics(ids []int, metricType string, metrics map[int]MetricsCollection, since time.Time) error {
+func (w *WirelessTags) updateMetrics(ids []uint8, metricType string, metrics map[uint8]MetricsCollection, since time.Time) error {
 
 	if len(ids) == 0 {
 		return nil
@@ -208,8 +190,8 @@ func (w *WirelessTags) updateMetrics(ids []int, metricType string, metrics map[i
 			return fmt.Errorf("Can't parse start date %s", stat.Date)
 		}
 		for i, slaveID := range stat.Ids {
-			for j := range stat.Tods[i] {
-				timestamp := startDate.Add(time.Second * time.Duration(stat.Tods[i][j]))
+			for j := range stat.TimeOfDay[i] {
+				timestamp := startDate.Add(time.Second * time.Duration(stat.TimeOfDay[i][j]))
 				if timestamp.Before(since) {
 					continue
 				}
@@ -230,7 +212,7 @@ func (w *WirelessTags) updateMetrics(ids []int, metricType string, metrics map[i
 	return nil
 }
 
-func (w *WirelessTags) requestMetrics(ids []int, metricType string, since time.Time) (*http.Response, error) {
+func (w *WirelessTags) requestMetrics(ids []uint8, metricType string, since time.Time) (*http.Response, error) {
 	input := &getMultiTagStatsRawInput{
 		IDs:      ids,
 		Type:     metricType,
@@ -260,17 +242,29 @@ type Metric map[string]interface{}
 type MetricsCollection map[time.Time]Metric
 
 type getMultiTagStatsRawInput struct {
-	IDs      []int  `json:"ids"`
-	Type     string `json:"type"`
-	FromDate string `json:"fromDate"`
-	ToDate   string `json:"toDate"`
+	IDs      []uint8 `json:"ids"`
+	Type     string  `json:"type"`
+	FromDate string  `json:"fromDate"`
+	ToDate   string  `json:"toDate"`
+}
+
+// IDs []uint8 encodes as a base64-encoded string, so we need our own marshalling
+func (t *getMultiTagStatsRawInput) MarshalJSON() ([]byte, error) {
+	var ids string
+	if t.IDs == nil {
+		ids = "null"
+	} else {
+		ids = strings.Join(strings.Fields(fmt.Sprintf("%d", t.IDs)), ",")
+	}
+	jsonResult := fmt.Sprintf(`{"ids": %s, "type": "%s","fromDate": "%s", "toDate": "%s"}`, ids, t.Type, t.FromDate, t.ToDate)
+	return []byte(jsonResult), nil
 }
 
 type rawStats []struct {
-	Date   string      `json:"date"`
-	Ids    []int       `json:"ids"`
-	Values [][]float64 `json:"values"`
-	Tods   [][]int     `json:"tods"`
+	Date      string      `json:"date"`
+	Ids       []uint8     `json:"ids"`
+	Values    [][]float32 `json:"values"`
+	TimeOfDay [][]uint32  `json:"tods"`
 }
 
 type message struct {
@@ -284,4 +278,25 @@ func closer(c io.Closer) {
 	if err != nil {
 		fmt.Printf("Error during Close: err")
 	}
+}
+
+// windowsFileTime returns the windows FILETIME value in Unix time.
+//  - Windows FILETIME is 100 nanosecond intervals since January 1, 1601 (UTC)
+//  - Unix Date time is seconds since January 1, 1970 (UTC)
+//  - Offset between the two epochs in milliseconds is 116444736e+5
+// Note that the smallest return resolution is milliseconds
+func windowsFileTime(intervals int64) time.Time {
+	// we need to convert 100ns intervals to ms so we don't overflow on int64
+	var ms = intervals / 10 / 1000
+
+	// offset between windows epoch and unix epoch in milliseconds
+	var epochOffset int64 = 116444736e+5
+
+	// millisecond since unix epoch start
+	var unix = time.Millisecond * time.Duration(ms-epochOffset)
+
+	sec := unix / time.Second
+	nsec := unix % time.Second
+
+	return time.Unix(int64(sec), int64(nsec))
 }
