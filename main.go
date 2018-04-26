@@ -147,8 +147,9 @@ func update(lastUpdated time.Time, location *time.Location) error {
 			wrote, err := addPoint(c, bp, tag.Labels(), metrics, ts)
 			if err != nil {
 				return err
+			} else {
+				y++
 			}
-			y += 1
 			if wrote {
 				bp = getNewPointBatch(influxDB)
 			}
