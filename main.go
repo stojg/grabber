@@ -3,23 +3,24 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"flag"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"runtime/pprof"
 	"time"
-
-	"log"
-
-	"flag"
 
 	influx "github.com/influxdata/influxdb/client/v2"
 	"github.com/stojg/grabber/lib/wirelesstags"
 )
 
 var (
-	netClient *http.Client
-	pool      *x509.CertPool
+	netClient  *http.Client
+	pool       *x509.CertPool
+	cpuProfile = flag.String("cpu-profile", "", "write cpu profile to file")
+	memProfile = flag.String("mem-profile", "", "write memory profile to this file")
 )
 
 const (
@@ -32,14 +33,11 @@ func init() {
 	netClient = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
 }
 
-var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
-var memprofile = flag.String("memprofile", "", "write memory profile to this file")
-
 func main() {
 
 	flag.Parse()
-	if *cpuprofile != "" {
-		f, err := os.Create(*cpuprofile)
+	if *cpuProfile != "" {
+		f, err := os.Create(*cpuProfile)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -53,29 +51,29 @@ func main() {
 		os.Exit(1)
 	}
 
-	//go func() {
-	//	for {
-	//		var m runtime.MemStats
-	//		runtime.ReadMemStats(&m)
-	//		log.Printf("['sys_mb': %0.2f,'numGC': %d]\n", float64(m.Sys)/1024/1024, m.NumGC)
-	//		time.Sleep(1 * time.Second)
-	//	}
-	//}()
+	go func() {
+		for {
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Printf("['sys_mb': %0.2f,'numGC': %d]\n", float64(m.Sys)/1024/1024, m.NumGC)
+			time.Sleep(1 * time.Second)
+		}
+	}()
 
-	lastUpdated := time.Now().In(loc).Add(-24 * time.Hour)
+	lastUpdated := time.Now().In(loc).Add(-24 * time.Hour * 1)
 	if err := update(lastUpdated, loc); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %s\n", err)
 	}
 	lastUpdated = time.Now().In(loc)
 
-	if *memprofile != "" {
-		f, err := os.Create(*memprofile)
+	if *memProfile != "" {
+		f, err := os.Create(*memProfile)
 		if err != nil {
 			log.Fatal(err)
 		}
 		pprof.WriteHeapProfile(f)
 		f.Close()
-		fmt.Printf("wrote memory profile to %s\n", *memprofile)
+		fmt.Printf("wrote memory profile to %s\n", *memProfile)
 		return
 	}
 
@@ -143,13 +141,12 @@ func update(lastUpdated time.Time, location *time.Location) error {
 
 	y := 0
 	for _, tag := range tags {
-		for ts, metrics := range tag.Metrics {
-			wrote, err := addPoint(c, bp, tag.Labels(), metrics, ts)
+		for unixTime, metrics := range tag.Metrics {
+			wrote, err := addPoint(c, bp, tag.Labels(), metrics, unixTime)
 			if err != nil {
 				return err
-			} else {
-				y++
 			}
+			y++
 			if wrote {
 				bp = getNewPointBatch(influxDB)
 			}
@@ -161,8 +158,14 @@ func update(lastUpdated time.Time, location *time.Location) error {
 	return err
 }
 
-func addPoint(c influx.Client, bp influx.BatchPoints, tags map[string]string, metrics map[string]interface{}, ts time.Time) (bool, error) {
-	pt, err := influx.NewPoint("sensors", tags, metrics, ts)
+func addPoint(c influx.Client, bp influx.BatchPoints, tags map[string]string, metrics []*wirelesstags.Metric, unix int64) (bool, error) {
+	data := make(map[string]interface{})
+
+	for _, m := range metrics {
+		data[m.Name()] = m.Value()
+	}
+
+	pt, err := influx.NewPoint("sensors", tags, data, time.Unix(unix, 0))
 	if err != nil {
 		return false, fmt.Errorf("error: %v", err)
 	}

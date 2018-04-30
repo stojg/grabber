@@ -20,8 +20,8 @@ func TestGet(t *testing.T) {
 	wt := New(&http.Client{}, ts.URL, "", time.Local)
 
 	since := time.Date(2017, time.October, 15, 15, 0, 0, 0, time.Local)
-	metrics := make(map[int]MetricsCollection)
-	err := wt.updateMetrics([]int{3, 1}, typeTemperature, metrics, since)
+	metrics := make(map[uint8]MetricsCollection)
+	err := wt.updateMetrics([]uint8{3, 1}, typeTemperature, metrics, since)
 	if err != nil {
 		t.Error(err)
 		return

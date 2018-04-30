@@ -4,28 +4,37 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
-	"time"
-
-	"io"
-
 	"strings"
+	"time"
 
 	"github.com/mitchellh/mapstructure"
 )
 
-const (
-	typeTemperature = "temperature"
-	typeLux         = "light"
-	typeHumidity    = "cap"
-	typeMotion      = "motion"
-	typeBattery     = "batteryVolt"
-	typeSignal      = "signal"
-)
+type metricType byte
 
-func typeToString(t string) string {
-	switch t {
+func (m metricType) toAPI() string {
+	switch m {
+	case typeTemperature:
+		return "temperature"
+	case typeLux:
+		return "light"
+	case typeHumidity:
+		return "cap"
+	case typeMotion:
+		return "motion"
+	case typeBattery:
+		return "batteryVolt"
+	case typeSignal:
+		return "signal"
+	}
+	return "unknown"
+}
+
+func (m metricType) toName() string {
+	switch m {
 	case typeTemperature:
 		return "temperature"
 	case typeLux:
@@ -38,10 +47,38 @@ func typeToString(t string) string {
 		return "battery"
 	case typeSignal:
 		return "signal"
-	default:
-		return t
 	}
+	return "unknown"
 }
+
+const (
+	_ metricType = iota
+	typeTemperature
+	typeLux
+	typeHumidity
+	typeMotion
+	typeBattery
+	typeSignal
+)
+
+// Metric has a name and value
+type Metric struct {
+	value float32
+	name  metricType
+}
+
+// Name returns the name representation of the metric
+func (m *Metric) Name() string {
+	return m.name.toName()
+}
+
+// Value returns the value of the metric
+func (m *Metric) Value() float32 {
+	return m.value
+}
+
+// MetricsCollection buckets metrics in a timestamp for a more efficient updating of the metrics in the backend
+type MetricsCollection map[int64][]*Metric
 
 // New creates a new client that is used for fetching tag sensor information from http://www.wirelesstag.net/
 func New(client *http.Client, domain, token string, location *time.Location) *WirelessTags {
@@ -64,6 +101,10 @@ type WirelessTags struct {
 // Get all sensor data and return a list of Sensor
 func (w *WirelessTags) Get(since time.Time) ([]*Sensor, error) {
 
+	//a := Metric{}
+	//fmt.Println(unsafe.Sizeof(a)) // 8 bytes
+	//os.Exit(0)
+
 	var body = []byte(`{}`)
 	req, err := http.NewRequest("POST", w.domain+"/ethClient.asmx/GetTagList2", bytes.NewBuffer(body))
 	if err != nil {
@@ -76,22 +117,22 @@ func (w *WirelessTags) Get(since time.Time) ([]*Sensor, error) {
 
 	var resp *http.Response
 	if resp, err = w.client.Do(req); err != nil {
-		return make([]*Sensor, 0), fmt.Errorf("error during tag GetTagList2: %v", err)
+		return nil, fmt.Errorf("error during tag GetTagList2: %v", err)
 	}
 	defer closer(resp.Body)
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("got status code %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected response status code %d", resp.StatusCode)
 	}
 
 	dec := json.NewDecoder(resp.Body)
 	if err = dec.Decode(&result); err != nil {
-		return make([]*Sensor, 0), fmt.Errorf("error parsing json response %v", err)
+		return nil, fmt.Errorf("error parsing JSON response body: %v", err)
 	}
 
 	var tags []*Sensor
 	if err = mapstructure.Decode(result["d"], &tags); err != nil {
-		return nil, fmt.Errorf("error while decoding tag data: %v", err)
+		return nil, fmt.Errorf("error while decoding sensor tag data: %v", err)
 	}
 
 	var temperatureTags []uint8
@@ -141,7 +182,7 @@ func (w *WirelessTags) Get(since time.Time) ([]*Sensor, error) {
 	return tags, err
 }
 
-func (w *WirelessTags) updateMetrics(ids []uint8, metricType string, metrics map[uint8]MetricsCollection, since time.Time) error {
+func (w *WirelessTags) updateMetrics(ids []uint8, mType metricType, metrics map[uint8]MetricsCollection, since time.Time) error {
 
 	if len(ids) == 0 {
 		return nil
@@ -149,7 +190,7 @@ func (w *WirelessTags) updateMetrics(ids []uint8, metricType string, metrics map
 
 	var resp *http.Response
 	var err error
-	if resp, err = w.requestMetrics(ids, metricType, since); err != nil {
+	if resp, err = w.requestMetrics(ids, mType.toAPI(), since); err != nil {
 		return err
 	}
 
@@ -161,7 +202,11 @@ func (w *WirelessTags) updateMetrics(ids []uint8, metricType string, metrics map
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		var message message
+		var message struct {
+			Message       string
+			ExceptionType string
+			StackTrace    string
+		}
 		if err = json.Unmarshal(body, &message); err != nil {
 			return err
 		}
@@ -169,7 +214,12 @@ func (w *WirelessTags) updateMetrics(ids []uint8, metricType string, metrics map
 	}
 
 	var result map[string]struct {
-		Stats    rawStats `json:"stats"`
+		Stats []struct {
+			Date      string      `json:"date"`
+			IDs       []uint8     `json:"ids"`
+			Values    [][]float32 `json:"values"`
+			TimeOfDay [][]uint32  `json:"tods"`
+		} `json:"stats"`
 		TempUnit int      `json:"temp_unit"`
 		Ids      []int    `json:"ids"`
 		Names    []string `json:"names"`
@@ -189,7 +239,7 @@ func (w *WirelessTags) updateMetrics(ids []uint8, metricType string, metrics map
 		if err != nil {
 			return fmt.Errorf("Can't parse start date %s", stat.Date)
 		}
-		for i, slaveID := range stat.Ids {
+		for i, slaveID := range stat.IDs {
 			for j := range stat.TimeOfDay[i] {
 				timestamp := startDate.Add(time.Second * time.Duration(stat.TimeOfDay[i][j]))
 				if timestamp.Before(since) {
@@ -197,14 +247,13 @@ func (w *WirelessTags) updateMetrics(ids []uint8, metricType string, metrics map
 				}
 
 				if _, ok := metrics[slaveID]; !ok {
-					metrics[slaveID] = make(map[time.Time]Metric)
+					metrics[slaveID] = make(MetricsCollection)
 				}
 
-				if _, ok := metrics[slaveID][timestamp]; !ok {
-					metrics[slaveID][timestamp] = Metric{}
-				}
-
-				metrics[slaveID][timestamp][typeToString(metricType)] = stat.Values[i][j]
+				metrics[slaveID][timestamp.Unix()] = append(metrics[slaveID][timestamp.Unix()], &Metric{
+					name:  mType,
+					value: stat.Values[i][j],
+				})
 			}
 		}
 	}
@@ -235,12 +284,6 @@ func (w *WirelessTags) requestMetrics(ids []uint8, metricType string, since time
 	return w.client.Do(req)
 }
 
-// Metric are typically something like this metric["temperature"] = 19.0
-type Metric map[string]interface{}
-
-// MetricsCollection buckets metrics in a timestamp for a more efficient updating of the metrics in the backend
-type MetricsCollection map[time.Time]Metric
-
 type getMultiTagStatsRawInput struct {
 	IDs      []uint8 `json:"ids"`
 	Type     string  `json:"type"`
@@ -258,19 +301,6 @@ func (t *getMultiTagStatsRawInput) MarshalJSON() ([]byte, error) {
 	}
 	jsonResult := fmt.Sprintf(`{"ids": %s, "type": "%s","fromDate": "%s", "toDate": "%s"}`, ids, t.Type, t.FromDate, t.ToDate)
 	return []byte(jsonResult), nil
-}
-
-type rawStats []struct {
-	Date      string      `json:"date"`
-	Ids       []uint8     `json:"ids"`
-	Values    [][]float32 `json:"values"`
-	TimeOfDay [][]uint32  `json:"tods"`
-}
-
-type message struct {
-	Message       string
-	ExceptionType string
-	StackTrace    string
 }
 
 func closer(c io.Closer) {
