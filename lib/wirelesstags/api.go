@@ -218,15 +218,15 @@ func (c *Client) Get(since time.Time) ([]*Sensor, error) {
 
 	// the metrics are keyed by the sensors slaveID
 	metrics := make(map[uint8]MetricsCollection)
-	if err = c.updateMetrics(temperatureTags, typeTemperature, metrics, since); err != nil {
+	if err = c.getMetrics(temperatureTags, typeTemperature, metrics, since); err != nil {
 		return nil, err
 	}
 
-	if err = c.updateMetrics(humidityTags, typeHumidity, metrics, since); err != nil {
+	if err = c.getMetrics(humidityTags, typeHumidity, metrics, since); err != nil {
 		return nil, err
 	}
 
-	if err = c.updateMetrics(lightTags, typeLux, metrics, since); err != nil {
+	if err = c.getMetrics(lightTags, typeLux, metrics, since); err != nil {
 		return nil, err
 	}
 
@@ -239,7 +239,7 @@ func (c *Client) Get(since time.Time) ([]*Sensor, error) {
 	return tags, err
 }
 
-func (c *Client) updateMetrics(ids []uint8, mType metricType, metrics map[uint8]MetricsCollection, since time.Time) error {
+func (c *Client) getMetrics(ids []uint8, mType metricType, metrics map[uint8]MetricsCollection, since time.Time) error {
 
 	if len(ids) == 0 {
 		return nil
@@ -294,7 +294,7 @@ func (c *Client) updateMetrics(ids []uint8, mType metricType, metrics map[uint8]
 	for _, stat := range result["d"].Stats {
 		startDate, err := time.ParseInLocation("1/2/2006", stat.Date, auckland)
 		if err != nil {
-			return fmt.Errorf("Can't parse start date %s", stat.Date)
+			return fmt.Errorf("can't parse start date %s", stat.Date)
 		}
 		for i, slaveID := range stat.IDs {
 			for j := range stat.TimeOfDay[i] {
