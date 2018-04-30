@@ -17,7 +17,10 @@ func TestGet(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	wt := New(&http.Client{}, ts.URL, "", time.Local)
+	wt, _ := NewHTTPClient(HTTPConfig{
+		Addr:     ts.URL,
+		Location: time.Local,
+	})
 
 	since := time.Date(2017, time.October, 15, 15, 0, 0, 0, time.Local)
 	metrics := make(map[uint8]MetricsCollection)

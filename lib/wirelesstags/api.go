@@ -10,6 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"crypto/tls"
+
+	"errors"
+	"net/url"
+
 	"github.com/mitchellh/mapstructure"
 )
 
@@ -80,43 +85,95 @@ func (m *Metric) Value() float32 {
 // MetricsCollection buckets metrics in a timestamp for a more efficient updating of the metrics in the backend
 type MetricsCollection map[int64][]*Metric
 
-// New creates a new client that is used for fetching tag sensor information from http://www.wirelesstag.net/
-func New(client *http.Client, domain, token string, location *time.Location) *WirelessTags {
-	return &WirelessTags{
-		client:   client,
-		domain:   domain,
-		token:    token,
-		location: location,
-	}
+// HTTPConfig is the config data needed to create an HTTP Client.
+type HTTPConfig struct {
+	// Addr should be of the form "http://host:port"
+	// or "http://[ipv6-host%zone]:port".
+	Addr string
+
+	// Token is the API token for the wirelesstag API
+	Token string
+
+	// Location is what timezone that the tags has been set to
+	Location *time.Location
+
+	// UserAgent is the http User Agent, defaults to "WirelessTagClient".
+	UserAgent string
+
+	// Timeout for gets writes, defaults to no timeout.
+	Timeout time.Duration
+
+	// InsecureSkipVerify gets passed to the http client, if true, it will
+	// skip https certificate verification. Defaults to false.
+	InsecureSkipVerify bool
+
+	// TLSConfig allows the user to set their own TLS config for the HTTP
+	// Client. If set, this option overrides InsecureSkipVerify.
+	TLSConfig *tls.Config
 }
 
-// WirelessTags is a holder for information used for getting and parsing sensor tag data
-type WirelessTags struct {
-	client   *http.Client
-	domain   string
-	token    string
-	location *time.Location
+// NewHTTPClient creates a new httpClient that is used for fetching tag sensor information from http://www.wirelesstag.net/
+func NewHTTPClient(conf HTTPConfig) (*Client, error) {
+
+	if conf.UserAgent == "" {
+		conf.UserAgent = "WirelessTagClient"
+	}
+
+	u, err := url.Parse(conf.Addr)
+	if err != nil {
+		return nil, err
+	} else if u.Scheme != "http" && u.Scheme != "https" {
+		m := fmt.Sprintf("Unsupported protocol scheme: %s, your address must start with http:// or https://", u.Scheme)
+		return nil, errors.New(m)
+	}
+
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: conf.InsecureSkipVerify,
+		},
+	}
+	if conf.TLSConfig != nil {
+		tr.TLSClientConfig = conf.TLSConfig
+	}
+	return &Client{
+		url:       *u,
+		token:     conf.Token,
+		useragent: conf.UserAgent,
+		location:  conf.Location,
+		httpClient: &http.Client{
+			Timeout:   conf.Timeout,
+			Transport: tr,
+		},
+	}, nil
+
+}
+
+// Client is a holder for information used for getting and parsing sensor tag data
+type Client struct {
+	url        url.URL
+	token      string
+	location   *time.Location
+	useragent  string
+	httpClient *http.Client
 }
 
 // Get all sensor data and return a list of Sensor
-func (w *WirelessTags) Get(since time.Time) ([]*Sensor, error) {
+func (c *Client) Get(since time.Time) ([]*Sensor, error) {
 
-	//a := Metric{}
-	//fmt.Println(unsafe.Sizeof(a)) // 8 bytes
-	//os.Exit(0)
+	u := c.url
+	u.Path = "ethClient.asmx/GetTagList2"
 
-	var body = []byte(`{}`)
-	req, err := http.NewRequest("POST", w.domain+"/ethClient.asmx/GetTagList2", bytes.NewBuffer(body))
+	req, err := http.NewRequest("POST", u.String(), bytes.NewBuffer([]byte(`{}`)))
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %v", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+w.token)
+	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 
 	var result map[string]interface{}
 
 	var resp *http.Response
-	if resp, err = w.client.Do(req); err != nil {
+	if resp, err = c.httpClient.Do(req); err != nil {
 		return nil, fmt.Errorf("error during tag GetTagList2: %v", err)
 	}
 	defer closer(resp.Body)
@@ -161,15 +218,15 @@ func (w *WirelessTags) Get(since time.Time) ([]*Sensor, error) {
 
 	// the metrics are keyed by the sensors slaveID
 	metrics := make(map[uint8]MetricsCollection)
-	if err = w.updateMetrics(temperatureTags, typeTemperature, metrics, since); err != nil {
+	if err = c.updateMetrics(temperatureTags, typeTemperature, metrics, since); err != nil {
 		return nil, err
 	}
 
-	if err = w.updateMetrics(humidityTags, typeHumidity, metrics, since); err != nil {
+	if err = c.updateMetrics(humidityTags, typeHumidity, metrics, since); err != nil {
 		return nil, err
 	}
 
-	if err = w.updateMetrics(lightTags, typeLux, metrics, since); err != nil {
+	if err = c.updateMetrics(lightTags, typeLux, metrics, since); err != nil {
 		return nil, err
 	}
 
@@ -182,7 +239,7 @@ func (w *WirelessTags) Get(since time.Time) ([]*Sensor, error) {
 	return tags, err
 }
 
-func (w *WirelessTags) updateMetrics(ids []uint8, mType metricType, metrics map[uint8]MetricsCollection, since time.Time) error {
+func (c *Client) updateMetrics(ids []uint8, mType metricType, metrics map[uint8]MetricsCollection, since time.Time) error {
 
 	if len(ids) == 0 {
 		return nil
@@ -190,7 +247,7 @@ func (w *WirelessTags) updateMetrics(ids []uint8, mType metricType, metrics map[
 
 	var resp *http.Response
 	var err error
-	if resp, err = w.requestMetrics(ids, mType.toAPI(), since); err != nil {
+	if resp, err = c.requestMetrics(ids, mType.toAPI(), since); err != nil {
 		return err
 	}
 
@@ -261,12 +318,12 @@ func (w *WirelessTags) updateMetrics(ids []uint8, mType metricType, metrics map[
 	return nil
 }
 
-func (w *WirelessTags) requestMetrics(ids []uint8, metricType string, since time.Time) (*http.Response, error) {
+func (c *Client) requestMetrics(ids []uint8, metricType string, since time.Time) (*http.Response, error) {
 	input := &getMultiTagStatsRawInput{
 		IDs:      ids,
 		Type:     metricType,
 		FromDate: since.Format("1/2/2006"),
-		ToDate:   time.Now().In(w.location).Format("1/2/2006"),
+		ToDate:   time.Now().In(c.location).Format("1/2/2006"),
 	}
 
 	requestBody, err := json.Marshal(input)
@@ -274,14 +331,17 @@ func (w *WirelessTags) requestMetrics(ids []uint8, metricType string, since time
 		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", w.domain+"/ethLogs.asmx/GetMultiTagStatsRaw", bytes.NewBuffer(requestBody))
+	u := c.url
+	u.Path = "ethLogs.asmx/GetMultiTagStatsRaw"
+
+	req, err := http.NewRequest("POST", u.String(), bytes.NewBuffer(requestBody))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+w.token)
+	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 
-	return w.client.Do(req)
+	return c.httpClient.Do(req)
 }
 
 type getMultiTagStatsRawInput struct {

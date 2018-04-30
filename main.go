@@ -1,15 +1,10 @@
 package main
 
 import (
-	"crypto/tls"
-	"crypto/x509"
-	"flag"
+	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
-	"runtime"
-	"runtime/pprof"
 	"time"
 
 	influx "github.com/influxdata/influxdb/client/v2"
@@ -17,145 +12,96 @@ import (
 )
 
 var (
-	netClient  *http.Client
-	pool       *x509.CertPool
-	cpuProfile = flag.String("cpu-profile", "", "write cpu profile to file")
-	memProfile = flag.String("mem-profile", "", "write memory profile to this file")
+	netClient *http.Client
 )
 
 const (
-	maxBatch = 1000
+	// how many points are we going to send to influxDB in one request
+	influxMaxBatch = 1000
 )
 
 func init() {
-	pool = x509.NewCertPool()
-	pool.AppendCertsFromPEM(pemCerts)
-	netClient = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	netClient = &http.Client{Transport: &http.Transport{}}
 }
 
 func main() {
 
-	flag.Parse()
-	if *cpuProfile != "" {
-		f, err := os.Create(*cpuProfile)
-		if err != nil {
-			log.Fatal(err)
-		}
-		pprof.StartCPUProfile(f)
-		defer pprof.StopCPUProfile()
-	}
-
-	loc, err := time.LoadLocation("Pacific/Auckland")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "TZ load location error: %s\n", err)
-		os.Exit(1)
-	}
-
-	go func() {
-		for {
-			var m runtime.MemStats
-			runtime.ReadMemStats(&m)
-			log.Printf("['sys_mb': %0.2f,'numGC': %d]\n", float64(m.Sys)/1024/1024, m.NumGC)
-			time.Sleep(1 * time.Second)
-		}
-	}()
-
-	lastUpdated := time.Now().In(loc).Add(-24 * time.Hour * 1)
-	if err := update(lastUpdated, loc); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %s\n", err)
-	}
-	lastUpdated = time.Now().In(loc)
-
-	if *memProfile != "" {
-		f, err := os.Create(*memProfile)
-		if err != nil {
-			log.Fatal(err)
-		}
-		pprof.WriteHeapProfile(f)
-		f.Close()
-		fmt.Printf("wrote memory profile to %s\n", *memProfile)
-		return
-	}
-
-	ticker := time.NewTicker(time.Minute * 1)
-	for range ticker.C {
-		if err := update(lastUpdated, loc); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %s\n", err)
-		}
-		lastUpdated = time.Now().In(loc)
-	}
-}
-
-func update(lastUpdated time.Time, location *time.Location) error {
-
-	token := os.Getenv("GRABBER_TAG_TOKEN")
-	if token == "" {
-		fmt.Println("Requires env variable 'GRABBER_TAG_TOKEN'")
-	}
-
 	influxHost := os.Getenv("GRABBER_INFLUX_HOST")
 	if influxHost == "" {
-		fmt.Println("Requires env variable 'GRABBER_INFLUX_HOST'")
-	}
-
-	influxDB := os.Getenv("GRABBER_INFLUX_DB")
-	if influxHost == "" {
-		fmt.Println("Requires env variable 'GRABBER_INFLUX_DB'")
+		handleError(errors.New("requires ENV variable 'GRABBER_INFLUX_HOST'"))
 	}
 
 	influxUser := os.Getenv("GRABBER_INFLUX_USER")
 	if influxHost == "" {
-		fmt.Println("Requires env variable 'GRABBER_INFLUX_USER'")
+		handleError(errors.New("requires ENV variable 'GRABBER_INFLUX_USER'"))
 	}
 
 	influxPassword := os.Getenv("GRABBER_INFLUX_PASSWORD")
 	if influxHost == "" {
-		fmt.Println("Requires env variable 'GRABBER_INFLUX_PASSWORD'")
+		handleError(errors.New("requires ENV variable 'GRABBER_INFLUX_PASSWORD'"))
 	}
 
-	if token == "" {
-		os.Exit(1)
+	influxDB := os.Getenv("GRABBER_INFLUX_DB")
+	if influxHost == "" {
+		handleError(errors.New("requires ENV variable 'GRABBER_INFLUX_DB'"))
 	}
 
-	wirelessTags := wirelesstags.New(netClient, "https://www.mytaglist.com", token, location)
-
-	tags, err := wirelessTags.Get(lastUpdated)
-	if err != nil {
-		return fmt.Errorf("error on tag update: %v", err)
+	wirelessTagToken := os.Getenv("GRABBER_TAG_TOKEN")
+	if wirelessTagToken == "" {
+		handleError(errors.New("requires ENV variable 'GRABBER_TAG_TOKEN'"))
 	}
 
-	fmt.Printf("read metrics for %d tags from mytaglist.com\n", len(tags))
-
-	c, err := influx.NewHTTPClient(influx.HTTPConfig{
-		Addr:     influxHost,
-		Username: influxUser,
-		Password: influxPassword,
+	influxClient, err := influx.NewHTTPClient(influx.HTTPConfig{
+		Addr:      influxHost,
+		Username:  influxUser,
+		Password:  influxPassword,
+		UserAgent: "grabber",
 	})
+	handleError(err)
 
+	// the timezone should be set to what the wireless tags have been set to
+	loc, err := time.LoadLocation("Pacific/Auckland")
+	handleError(err)
+
+	tagClient, err := wirelesstags.NewHTTPClient(wirelesstags.HTTPConfig{
+		Addr:     "https://www.mytaglist.com",
+		Token:    wirelessTagToken,
+		Location: loc,
+	})
+	handleError(err)
+
+	lastUpdated := time.Now().In(loc).Add(-24 * time.Hour)
+	for ticker := time.NewTicker(time.Minute * 5); true; <-ticker.C {
+		fmt.Fprintln(os.Stdout, "starting update")
+		if err := update(tagClient, influxClient, influxDB, lastUpdated); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+		}
+		lastUpdated = time.Now().In(loc)
+		fmt.Fprintln(os.Stdout, "update done")
+	}
+}
+
+func update(wirelessTags *wirelesstags.Client, influxClient influx.Client, databaseName string, from time.Time) error {
+
+	tags, err := wirelessTags.Get(from)
 	if err != nil {
-		return fmt.Errorf("error: %v", err)
+		return fmt.Errorf("on tag update: %v", err)
 	}
 
-	// Create a new point batch
-	bp := getNewPointBatch(influxDB)
+	bp := getNewPointBatch(databaseName)
 
-	y := 0
 	for _, tag := range tags {
 		for unixTime, metrics := range tag.Metrics {
-			wrote, err := addPoint(c, bp, tag.Labels(), metrics, unixTime)
+			wrote, err := addPoint(influxClient, bp, tag.Labels(), metrics, unixTime)
 			if err != nil {
 				return err
 			}
-			y++
 			if wrote {
-				bp = getNewPointBatch(influxDB)
+				bp = getNewPointBatch(databaseName)
 			}
 		}
 	}
-
-	err = writePoints(c, bp)
-	fmt.Fprintf(os.Stdout, "Updated %d data points\n", y)
-	return err
+	return writePoints(influxClient, bp)
 }
 
 func addPoint(c influx.Client, bp influx.BatchPoints, tags map[string]string, metrics []*wirelesstags.Metric, unix int64) (bool, error) {
@@ -171,7 +117,7 @@ func addPoint(c influx.Client, bp influx.BatchPoints, tags map[string]string, me
 	}
 	bp.AddPoint(pt)
 
-	if len(bp.Points()) >= maxBatch {
+	if len(bp.Points()) >= influxMaxBatch {
 		if err := writePoints(c, bp); err != nil {
 			return false, err
 		}
@@ -204,4 +150,11 @@ func getNewPointBatch(influxDB string) influx.BatchPoints {
 		panic(err)
 	}
 	return bp
+}
+
+func handleError(err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err)
+		os.Exit(1)
+	}
 }
