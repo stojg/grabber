@@ -1,18 +1,14 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"time"
 
+	"github.com/stojg/grabber/internal/config"
+
 	influx "github.com/influxdata/influxdb/client/v2"
 	"github.com/stojg/grabber/lib/wirelesstags"
-)
-
-var (
-	netClient *http.Client
 )
 
 const (
@@ -20,41 +16,15 @@ const (
 	influxMaxBatch = 1000
 )
 
-func init() {
-	netClient = &http.Client{Transport: &http.Transport{}}
-}
-
 func main() {
 
-	influxHost := os.Getenv("GRABBER_INFLUX_HOST")
-	if influxHost == "" {
-		handleError(errors.New("requires ENV variable 'GRABBER_INFLUX_HOST'"))
-	}
-
-	influxUser := os.Getenv("GRABBER_INFLUX_USER")
-	if influxHost == "" {
-		handleError(errors.New("requires ENV variable 'GRABBER_INFLUX_USER'"))
-	}
-
-	influxPassword := os.Getenv("GRABBER_INFLUX_PASSWORD")
-	if influxHost == "" {
-		handleError(errors.New("requires ENV variable 'GRABBER_INFLUX_PASSWORD'"))
-	}
-
-	influxDB := os.Getenv("GRABBER_INFLUX_DB")
-	if influxHost == "" {
-		handleError(errors.New("requires ENV variable 'GRABBER_INFLUX_DB'"))
-	}
-
-	wirelessTagToken := os.Getenv("GRABBER_TAG_TOKEN")
-	if wirelessTagToken == "" {
-		handleError(errors.New("requires ENV variable 'GRABBER_TAG_TOKEN'"))
-	}
+	cfg, err := config.Load()
+	handleError(err)
 
 	influxClient, err := influx.NewHTTPClient(influx.HTTPConfig{
-		Addr:      influxHost,
-		Username:  influxUser,
-		Password:  influxPassword,
+		Addr:      cfg.InfluxDB.Host,
+		Username:  cfg.InfluxDB.User,
+		Password:  cfg.InfluxDB.Password,
 		UserAgent: "grabber",
 	})
 	handleError(err)
@@ -65,7 +35,7 @@ func main() {
 
 	tagClient, err := wirelesstags.NewHTTPClient(wirelesstags.HTTPConfig{
 		Addr:     "https://www.mytaglist.com",
-		Token:    wirelessTagToken,
+		Token:    cfg.WirelessTag.Token,
 		Location: loc,
 	})
 	handleError(err)
@@ -73,7 +43,7 @@ func main() {
 	lastUpdated := time.Now().In(loc).Add(-24 * time.Hour)
 	for ticker := time.NewTicker(time.Minute * 5); true; <-ticker.C {
 		fmt.Fprintln(os.Stdout, "starting update")
-		if err := update(tagClient, influxClient, influxDB, lastUpdated); err != nil {
+		if err := update(tagClient, influxClient, cfg.InfluxDB.DB, lastUpdated); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %s\n", err)
 		}
 		lastUpdated = time.Now().In(loc)
@@ -154,7 +124,10 @@ func getNewPointBatch(influxDB string) influx.BatchPoints {
 
 func handleError(err error) {
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
+		_, logErr := fmt.Fprintf(os.Stderr, "%s\n", err)
+		if logErr != nil {
+			panic(err)
+		}
 		os.Exit(1)
 	}
 }
