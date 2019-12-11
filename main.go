@@ -40,22 +40,22 @@ func main() {
 	})
 	handleError(err)
 
-	lastUpdated := time.Now().In(loc).Add(-24 * time.Hour)
+	lastUpdated := time.Now().In(loc).Add(-2 * 24 * time.Hour)
 	for ticker := time.NewTicker(time.Minute * 5); true; <-ticker.C {
-		fmt.Fprintln(os.Stdout, "starting update")
+		//logf("fetching data from %s\n", lastUpdated)
 		if err := update(tagClient, influxClient, cfg.InfluxDB.DB, lastUpdated); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %s\n", err)
+			logf("error: %s\n", err)
 		}
 		lastUpdated = time.Now().In(loc)
-		fmt.Fprintln(os.Stdout, "update done")
 	}
+
 }
 
-func update(wirelessTags *wirelesstags.Client, influxClient influx.Client, databaseName string, from time.Time) error {
+func update(wirelessTags *wirelesstags.Client, influxClient influx.Client, databaseName string, fromTime time.Time) error {
 
-	tags, err := wirelessTags.Get(from)
+	tags, err := wirelessTags.Get(fromTime)
 	if err != nil {
-		return fmt.Errorf("on tag update: %v", err)
+		return fmt.Errorf("wirelessTags.Get - %v", err)
 	}
 
 	bp := getNewPointBatch(databaseName)
@@ -87,6 +87,7 @@ func addPoint(c influx.Client, bp influx.BatchPoints, tags map[string]string, me
 	}
 	bp.AddPoint(pt)
 
+	// @todo this looks weird, looks like it doesnt batch
 	if len(bp.Points()) >= influxMaxBatch {
 		if err := writePoints(c, bp); err != nil {
 			return false, err
@@ -120,6 +121,14 @@ func getNewPointBatch(influxDB string) influx.BatchPoints {
 		panic(err)
 	}
 	return bp
+}
+
+func logln(msg string) {
+	_, _ = fmt.Fprintln(os.Stdout, msg)
+}
+
+func logf(msg string, a ...interface{}) {
+	_, _ = fmt.Fprintf(os.Stderr, msg, a...)
 }
 
 func handleError(err error) {

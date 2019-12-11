@@ -7,46 +7,51 @@ import (
 
 // Sensor represents a single sensor tag with the information provided from the API. The metrics can be found at Sensor.Metrics
 type Sensor struct {
-	Name    string `json:"name"`
-	Comment string `json:"comment"`
-	//TempEventState int     `json:"tempEventState"` // Disarmed, TooLow, TooHigh, Normal
-	OutOfRange bool `json:"outOfRange"`
-	//Temperature    float64 `json:"temperature"`
-	SlaveID uint8 `json:"slaveId"`
-	//BatteryVolt    float64 `json:"batteryVolt"`
-	//Lux            float64 `json:"lux"`
-	//Humidity       float64 `json:"cap"` // humidity
-	//Type           string  `json:"__type"`
-	//ManagerName    string  `json:"managerName"`
-	TagType  int   `json:"tagType"`
-	LastComm int64 `json:"lastComm"`
-	//Alive          bool    `json:"alive"`
-	//SignaldBm      int     `json:"signaldBm"`
-	//Beeping        bool    `json:"beeping"`
-	//Lit            bool    `json:"lit"`
-	//MigrationPending    bool    `json:"migrationPending"`
-	//BeepDurationDefault int     `json:"beepDurationDefault"`
+	ManagerName         string  `json:"managerName"`
+	Mac                 string  "json:mac"
+	Name                string  `json:"name"`
+	UUID                string  `json:"uuid"`
+	Comment             string  `json:"comment"`
+	SlaveID             uint8   `json:"slaveId"`
+	TagType             int     `json:"tagType"`
+	LastComm            int64   `json:"lastComm"`
+	Alive               bool    `json:"alive"`
+	SignaldBm           int     `json:"signaldBm"`
+	BatteryVolt         float64 `json:"batteryVolt"`
+	Beeping             bool    `json:"beeping"`
+	Lit                 bool    `json:"lit"`
+	MigrationPending    bool    `json:"migrationPending"`
+	BeepDurationDefault int     `json:"beepDurationDefault"`
 	//EventState          int     `json:"eventState"`
-	//TempCalOffset       float64 `json:"tempCalOffset"`
-	//CapCalOffset        int     `json:"capCalOffset"`
-	//CapRaw              int     `json:"capRaw"`
-	//Az2                 int     `json:"az2"`
-	//CapEventState       int     `json:"capEventState"`
-	//LightEventState     int     `json:"lightEventState"`
-	//Shorted             bool    `json:"shorted"`
-	//PostBackInterval    int     `json:"postBackInterval"`
-	//Rev                 int     `json:"rev"`
-	//Version1            int     `json:"version1"`
-	//FreqOffset          int     `json:"freqOffset"`
-	//FreqCalApplied      int     `json:"freqCalApplied"`
-	//ReviveEvery         int     `json:"reviveEvery"`
-	//OorGrace            int     `json:"oorGrace"`
-	//LBTh                float64 `json:"LBTh"`
-	//EnLBN               bool    `json:"enLBN"`
-	//Txpwr               int     `json:"txpwr"`
-	//RssiMode            bool    `json:"rssiMode"`
-	//Ds18                bool    `json:"ds18"`
-	//BatteryRemaining    float64 `json:"batteryRemaining"`
+	//TempEventState int `json:"tempEventState"` // Disarmed, TooLow, TooHigh, Normal
+	OutOfRange    bool    `json:"outOfRange"`
+	Lux           float64 `json:"lux"`
+	Temperature   float64 `json:"temperature"`
+	TempCalOffset float64 `json:"tempCalOffset"`
+	CapCalOffset  int     `json:"capCalOffset"`
+	// image_md5
+	Humidity float64 `json:"cap"`
+	// CapRaw           int     `json:"capRaw"` //0??
+	// Az2              int     `json:"az2"` // no idea
+	// CapEventState    int     `json:"capEventState"` // no idea
+	// LightEventState  int     `json:"lightEventState"` // no idfea
+	// Shorted          bool    `json:"shorted"`// but why?
+	// zmod
+	// thermostat
+	// playback
+	// PostBackInterval int     `json:"postBackInterval"`
+	//Rev              int     `json:"rev"`
+	//Version1         int     `json:"version1"`
+	//FreqOffset       int     `json:"freqOffset"` ??
+	//FreqCalApplied   int     `json:"freqCalApplied"` >>
+	//ReviveEvery      int     `json:"reviveEvery"` ??
+	//OorGrace         int     `json:"oorGrace"` ??
+	//LBTh             float64 `json:"LBTh"`
+	//EnLBN            bool    `json:"enLBN"`
+	//Txpwr            int     `json:"txpwr"`
+	//RssiMode         bool    `json:"rssiMode"`
+	//Ds18             bool    `json:"ds18"`
+	//BatteryRemaining float64 `json:"batteryRemaining"` weird float, percent?
 
 	Metrics MetricsCollection
 }

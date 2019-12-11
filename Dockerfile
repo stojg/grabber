@@ -1,4 +1,4 @@
-FROM golang:1.10-alpine as golang
+FROM golang:1.13-alpine as golang
 WORKDIR /go/src/app/vendor/github.com/stojg/grabber
 COPY . .
 RUN CGO_ENABLED=0 go build -ldflags '-extldflags "-static"' -o /go/bin/app

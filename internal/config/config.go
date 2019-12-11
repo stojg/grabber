@@ -30,7 +30,7 @@ func Load() (*Config, error) {
 		WirelessTag: struct {
 			Token string
 		}{
-			Token: ENV_TOKEN,
+			Token: os.Getenv(ENV_TOKEN),
 		},
 	}
 	return cfg, validate(cfg)

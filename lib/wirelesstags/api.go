@@ -145,8 +145,10 @@ func NewHTTPClient(conf HTTPConfig) (*Client, error) {
 			Transport: tr,
 		},
 	}, nil
-
 }
+
+const base = "ethClient.asmx"
+const getTagList2 = "GetTagList2"
 
 // Client is a holder for information used for getting and parsing sensor tag data
 type Client struct {
@@ -161,29 +163,29 @@ type Client struct {
 func (c *Client) Get(since time.Time) ([]*Sensor, error) {
 
 	u := c.url
-	u.Path = "ethClient.asmx/GetTagList2"
+	u.Path = fmt.Sprintf("%s/%s", base, getTagList2)
 
-	req, err := http.NewRequest("POST", u.String(), bytes.NewBuffer([]byte(`{}`)))
+	reqBody := bytes.NewBuffer([]byte(`{}`))
+	req, err := http.NewRequest("POST", u.String(), reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %v", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 
-	var result map[string]interface{}
-
 	var resp *http.Response
 	if resp, err = c.httpClient.Do(req); err != nil {
-		return nil, fmt.Errorf("error during tag GetTagList2: %v", err)
+		return nil, fmt.Errorf("error during tag %s: %v", getTagList2, err)
 	}
 	defer closer(resp.Body)
 
+	// @todo better error handling
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("unexpected response status code %d", resp.StatusCode)
 	}
 
-	dec := json.NewDecoder(resp.Body)
-	if err = dec.Decode(&result); err != nil {
+	var result map[string]interface{}
+	if err = json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("error parsing JSON response body: %v", err)
 	}
 
@@ -192,11 +194,14 @@ func (c *Client) Get(since time.Time) ([]*Sensor, error) {
 		return nil, fmt.Errorf("error while decoding sensor tag data: %v", err)
 	}
 
+	var allTags []uint8
 	var temperatureTags []uint8
 	var lightTags []uint8
 	var humidityTags []uint8
 
 	for _, t := range tags {
+
+		allTags = append(allTags, t.SlaveID)
 
 		lastConn := windowsFileTime(t.LastComm)
 
@@ -227,6 +232,10 @@ func (c *Client) Get(since time.Time) ([]*Sensor, error) {
 	}
 
 	if err = c.getMetrics(lightTags, typeLux, metrics, since); err != nil {
+		return nil, err
+	}
+
+	if err = c.getMetrics(allTags, typeBattery, metrics, since); err != nil {
 		return nil, err
 	}
 
