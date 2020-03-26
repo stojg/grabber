@@ -181,7 +181,7 @@ func (c *Client) Get(since time.Time) ([]*Sensor, error) {
 
 	// @todo better error handling
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("unexpected response status code %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected response status code %d for %s", resp.StatusCode, req.Host)
 	}
 
 	var result map[string]interface{}

@@ -35,9 +35,11 @@ services:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USERNAME}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
   grabber:
+    depends_on:
+      - influxdb
     build: .
     environment:
-      - GRABBER_INFLUX_HOST=http://localhost:8086
+      - GRABBER_INFLUX_HOST=http://influxdb:8086
       - GRABBER_INFLUX_USER=${GRABBER_INFLUX_USER}
       - GRABBER_INFLUX_PASSWORD=${GRABBER_INFLUX_PASSWORD}
       - GRABBER_INFLUX_DB=${GRABBER_INFLUX_DB}

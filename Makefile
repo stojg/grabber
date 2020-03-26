@@ -12,10 +12,9 @@ build:
 	go build ${LDFLAGS}
 
 compose:
+	docker-compose build
 	docker-compose up
 
-setup:
-	curl -i -XPOST http://localhost:8086/query --data-urlencode "q=CREATE DATABASE grabber"
-
 clean:
+	docker-compose rm --stop  --force -v
 	docker volume rm grabber_chronograf-storage grabber_grafana-storage grabber_influxdb-storage
