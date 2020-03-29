@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"math"
+	"math/rand"
 	"os"
 	"time"
 
@@ -15,6 +17,8 @@ const (
 	// how many points are we going to send to influxDB in one request
 	influxMaxBatch = 1000
 )
+
+var debugMode = false
 
 func main() {
 
@@ -40,19 +44,34 @@ func main() {
 	})
 	handleError(err)
 
-	lastUpdated := time.Now().In(loc).Add(-2 * 24 * time.Hour)
-	for ticker := time.NewTicker(time.Minute * 5); true; <-ticker.C {
-		//logf("fetching data from %s\n", lastUpdated)
+	updateTick := time.Minute * 5
+	lastUpdated := time.Now().In(loc).Add(-90 * 24 * time.Hour)
+	for ticker := time.NewTicker(updateTick); true; <-ticker.C {
 		if err := update(tagClient, influxClient, cfg.InfluxDB.DB, lastUpdated); err != nil {
-			logf("error: %s\n", err)
+			logf("Update failure: %s\n", err)
+			logf("Will retry the update in %s\n", updateTick)
 		}
 		lastUpdated = time.Now().In(loc)
 	}
+}
 
+func debug(a string) {
+	if !debugMode {
+		return
+	}
+	fmt.Println(a)
+}
+
+func debugf(format string, a ...interface{}) {
+	if !debugMode {
+		return
+	}
+	fmt.Printf(format, a...)
 }
 
 func update(wirelessTags *wirelesstags.Client, influxClient influx.Client, databaseName string, fromTime time.Time) error {
 
+	debugf("fetching wireless tag data from %s\n", fromTime)
 	tags, err := wirelessTags.Get(fromTime)
 	if err != nil {
 		return fmt.Errorf("wirelessTags.Get - %v", err)
@@ -60,53 +79,68 @@ func update(wirelessTags *wirelesstags.Client, influxClient influx.Client, datab
 
 	bp := getNewPointBatch(databaseName)
 
+	debugf("data from %d sensors found\n", len(tags))
 	for _, tag := range tags {
 		for unixTime, metrics := range tag.Metrics {
-			wrote, err := addPoint(influxClient, bp, tag.Labels(), metrics, unixTime)
+			err := addPoint(bp, tag.Labels(), metrics, unixTime)
 			if err != nil {
 				return err
 			}
-			if wrote {
+
+			if len(bp.Points()) >= influxMaxBatch {
+				if err := writePoints(influxClient, bp, 1); err != nil {
+					return err
+				}
 				bp = getNewPointBatch(databaseName)
 			}
 		}
 	}
-	return writePoints(influxClient, bp)
+	// flush out the last points
+	return writePoints(influxClient, bp, 1)
 }
 
-func addPoint(c influx.Client, bp influx.BatchPoints, tags map[string]string, metrics []*wirelesstags.Metric, unix int64) (bool, error) {
+func addPoint(bp influx.BatchPoints, tags map[string]string, metrics []*wirelesstags.Metric, unix int64) error {
 	data := make(map[string]interface{})
-
 	for _, m := range metrics {
 		data[m.Name()] = m.Value()
 	}
-
 	pt, err := influx.NewPoint("sensors", tags, data, time.Unix(unix, 0))
 	if err != nil {
-		return false, fmt.Errorf("error: %v", err)
+		return fmt.Errorf("error: %v", err)
 	}
 	bp.AddPoint(pt)
-
-	// @todo this looks weird, looks like it doesnt batch
-	if len(bp.Points()) >= influxMaxBatch {
-		if err := writePoints(c, bp); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-	return false, nil
+	return nil
 }
 
-func writePoints(c influx.Client, bp influx.BatchPoints) error {
+func writePoints(c influx.Client, bp influx.BatchPoints, attempt int) error {
 	if len(bp.Points()) == 0 {
+		debugf("no data points to write into influxdb\n")
 		return nil
 	}
 
-	if err := c.Write(bp); err != nil {
-		return fmt.Errorf("database write error: %v", err)
+	debugf("writing %d points into influxdb\n", len(bp.Points()))
+	err := c.Write(bp)
+
+	if err == nil {
+		debugf("%d points were written into influxdb\n", len(bp.Points()))
+		return nil
 	}
 
-	return nil
+	if attempt >= 15 {
+		return fmt.Errorf("writing to influxdb failed after %d attempts: %s", attempt, err)
+	}
+
+	base := 100.0
+	maxSleep := 10000.0
+
+	temp := math.Min(maxSleep, base*math.Pow(float64(attempt), 2))
+	sleep := time.Duration(temp/2+rand.Float64()*temp/2) * time.Millisecond
+	debugf("failure to write into influxdb (attempt %d) sleeping for %s and retrying\n", attempt, sleep)
+	time.Sleep(sleep)
+
+	attempt++
+
+	return writePoints(c, bp, attempt)
 }
 
 func getNewPointBatch(influxDB string) influx.BatchPoints {
